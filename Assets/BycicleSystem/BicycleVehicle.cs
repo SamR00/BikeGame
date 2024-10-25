@@ -1,11 +1,33 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO.Ports;
 using UnityEngine;
 
 public class BicycleVehicle : MonoBehaviour
 {
+    [Tooltip("Port name with which the SerialPort object will be created.")]
+    public string portName = "COM3";
+
+    [Tooltip("Baud rate that the serial device is using to transmit data.")]
+    public int baudRate = 115200;
+
+    [Tooltip("Reference to an scene object that will receive the events of connection, " +
+             "disconnection and the messages from the serial device.")]
+    public GameObject messageListener;
+
+    [Tooltip("After an error in the serial communication, or an unsuccessful " +
+             "connect, how many milliseconds we should wait.")]
+    public int reconnectionDelay = 1000;
+
+    [Tooltip("Maximum number of unread data messages in the queue. " +
+             "New messages will be discarded.")]
+    public int maxUnreadMessages = 1;
+
+
     float horizontalInput;
     float vereticallInput;
+    SerialPort serialPort = new SerialPort("COM3", 9600);
+    float steeringInput;
 
     public Transform handle;
     bool braking;
@@ -51,7 +73,38 @@ public class BicycleVehicle : MonoBehaviour
     {
         StopEmitTrail();
         rb = GetComponent<Rigidbody>();
+        try
+        {
+            // Check if the specified port exists
+            if (System.IO.Ports.SerialPort.GetPortNames().Length > 0)
+            {
+                serialPort = new SerialPort(portName, baudRate);
+
+                // Ensure the specified port is in the list of available ports
+                if (System.Array.Exists(System.IO.Ports.SerialPort.GetPortNames(), port => port == portName))
+                {
+                    if (!serialPort.IsOpen)
+                    {
+                        serialPort.Open();
+                        serialPort.ReadTimeout = 100;
+                        Debug.Log($"Successfully opened port: {portName}");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"Port {portName} not found. Please check the connection.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("No available COM ports found. Please check your device connection.");
+            }
+            }
+    catch (System.Exception ex)
+    {
+        Debug.LogError($"Serial port error on start: {ex.Message}");
     }
+        }
 
     // Update is called once per frame
     void FixedUpdate()
@@ -68,6 +121,23 @@ public class BicycleVehicle : MonoBehaviour
 
     public void GetInput()
     {
+        try
+        {
+            if (serialPort != null && serialPort.IsOpen)
+            {
+                string arduino = serialPort.ReadLine();
+                steeringInput = float.Parse(arduino);
+            }
+            else
+            {
+                steeringInput = Input.GetAxis("Horizontal"); 
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Serial read error: {ex.Message}");
+        }
+
         horizontalInput = Input.GetAxis("Horizontal");
         vereticallInput = Input.GetAxis("Vertical");
         braking = Input.GetKey(KeyCode.Space);
@@ -149,12 +219,26 @@ public class BicycleVehicle : MonoBehaviour
 
     public void HandleSteering()
     {
+
         SpeedSteerinReductor();
+        if (serialPort != null && serialPort.IsOpen)
+        {
+            // Directly map the steeringInput to the steering angle
+            currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, steeringInput, turnSmoothing);
 
-        currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, maxSteeringAngle * horizontalInput, turnSmoothing);
-        frontWheel.steerAngle = currentSteeringAngle;
+            // Clamp the steering angle to ensure it doesn't exceed the bike's max steering capabilities
+            currentSteeringAngle = Mathf.Clamp(currentSteeringAngle, -maxSteeringAngle, maxSteeringAngle);
 
-        targetlayingAngle = maxlayingAngle * -horizontalInput;
+            frontWheel.steerAngle = currentSteeringAngle;
+            targetlayingAngle = maxlayingAngle * -steeringInput / maxSteeringAngle;
+        }
+        else
+        {
+            currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, maxSteeringAngle * horizontalInput, turnSmoothing);
+            frontWheel.steerAngle = currentSteeringAngle;
+
+            targetlayingAngle = maxlayingAngle * -horizontalInput;
+        }
     }
 
     private void LayOnTurn()
@@ -216,5 +300,11 @@ public class BicycleVehicle : MonoBehaviour
         wheelCollider.GetWorldPose(out pos, out rot);
         wheelTransform.rotation = rot;
         wheelTransform.position = pos;
+    }
+
+    void OnApplicationQuit()
+    {
+        if (serialPort.IsOpen)
+            serialPort.Close();
     }
 }
