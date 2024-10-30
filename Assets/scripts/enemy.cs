@@ -6,13 +6,19 @@ public class EnemyController : MonoBehaviour
     public float turnSpeed = 100f;     // Speed of turning/steering
     public float health = 100f;        // Enemy health
 
+    private float originalMoveSpeed; // Store the original movement speed
+    private bool isSlowed = false; // Track if the enemy is slowed
+
     private Rigidbody rb;
 
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
         rb.freezeRotation = true;
+        originalMoveSpeed = moveSpeed; 
     }
+
+
 
     private void OnCollisionEnter(Collision collision)
     {
@@ -82,5 +88,24 @@ public class EnemyController : MonoBehaviour
             Vector3 forwardMovement = transform.forward * moveInput * moveSpeed * Time.deltaTime;
             rb.MovePosition(rb.position + forwardMovement);  // Move the object forward in its facing direction
         }
+    }
+
+    public void ApplySlow(float duration, float slowFactor)
+    {
+        if (!isSlowed)
+        {
+            isSlowed = true;
+            moveSpeed *= slowFactor; // Reduce the move speed
+
+            // Start a coroutine to reset the speed after the duration
+            StartCoroutine(ResetSpeedAfterDelay(duration));
+        }
+    }
+
+    private System.Collections.IEnumerator ResetSpeedAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        moveSpeed = originalMoveSpeed; // Restore the original speed
+        isSlowed = false; // Reset the slowed state
     }
 }

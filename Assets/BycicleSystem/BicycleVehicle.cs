@@ -5,39 +5,24 @@ using UnityEngine;
 
 public class BicycleVehicle : MonoBehaviour
 {
-    [Tooltip("Port name with which the SerialPort object will be created.")]
     public string portName = "COM3";
-
-    [Tooltip("Baud rate that the serial device is using to transmit data.")]
     public int baudRate = 115200;
+    public int readTimeout = 1000;
+    private SerialPort serialPort;
 
-    [Tooltip("Reference to an scene object that will receive the events of connection, " +
-             "disconnection and the messages from the serial device.")]
-    public GameObject messageListener;
-
-    [Tooltip("After an error in the serial communication, or an unsuccessful " +
-             "connect, how many milliseconds we should wait.")]
-    public int reconnectionDelay = 1000;
-
-    [Tooltip("Maximum number of unread data messages in the queue. " +
-             "New messages will be discarded.")]
-    public int maxUnreadMessages = 1;
-
+    private string lastReceivedData = ""; // Store the last received value.
 
     float horizontalInput;
     float vereticallInput;
-    SerialPort serialPort = new SerialPort("COM3", 9600);
     float steeringInput;
 
     public Transform handle;
     bool braking;
-    Rigidbody rb;
 
     public Vector3 COG;
 
-    [SerializeField] float motorforce;
-    [SerializeField] float brakeForce;
-    float currentbrakeForce;
+    [SerializeField] float movementSpeed = 10f; // Direct movement speed multiplier.
+    [SerializeField] float brakeSpeed = 5f; // Speed reduction when braking.
 
     float steeringAngle;
     [SerializeField] float currentSteeringAngle;
@@ -50,9 +35,6 @@ public class BicycleVehicle : MonoBehaviour
     [Range(-40, 40)] public float layingammount;
     [Range(0.000001f, 1)][SerializeField] float leanSmoothing;
 
-    [SerializeField] WheelCollider frontWheel;
-    [SerializeField] WheelCollider backWheel;
-
     [SerializeField] Transform frontWheeltransform;
     [SerializeField] Transform backWheeltransform;
 
@@ -62,51 +44,24 @@ public class BicycleVehicle : MonoBehaviour
     public bool frontGrounded;
     public bool rearGrounded;
 
-    // Friction variables
-    [SerializeField] float brakeFriction = 1.0f; // Starting friction value
-    [SerializeField] float frictionDecayRate = 0.1f; // Rate at which friction decreases
-    [SerializeField] float minFriction = 0.1f; // Minimum friction value
-    [SerializeField] float frictionRecoveryRate = 0.05f; // Rate at which friction recovers
-
-    // Start is called before the first frame update
     void Start()
     {
         StopEmitTrail();
-        rb = GetComponent<Rigidbody>();
+        // Initialize the serial port.
+        serialPort = new SerialPort(portName, baudRate);
+        serialPort.ReadTimeout = readTimeout;
+
         try
         {
-            // Check if the specified port exists
-            if (System.IO.Ports.SerialPort.GetPortNames().Length > 0)
-            {
-                serialPort = new SerialPort(portName, baudRate);
-
-                // Ensure the specified port is in the list of available ports
-                if (System.Array.Exists(System.IO.Ports.SerialPort.GetPortNames(), port => port == portName))
-                {
-                    if (!serialPort.IsOpen)
-                    {
-                        serialPort.Open();
-                        serialPort.ReadTimeout = 100;
-                        Debug.Log($"Successfully opened port: {portName}");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning($"Port {portName} not found. Please check the connection.");
-                }
-            }
-            else
-            {
-                Debug.LogWarning("No available COM ports found. Please check your device connection.");
-            }
-            }
-    catch (System.Exception ex)
-    {
-        Debug.LogError($"Serial port error on start: {ex.Message}");
-    }
+            serialPort.Open();
+            Debug.Log("Serial port opened successfully.");
         }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Failed to open serial port: {ex.Message}");
+        }
+    }
 
-    // Update is called once per frame
     void FixedUpdate()
     {
         GetInput();
@@ -115,22 +70,58 @@ public class BicycleVehicle : MonoBehaviour
         UpdateWheels();
         UpdateHandle();
         LayOnTurn();
-        DownPresureOnSpeed();
         EmitTrail();
+    }
+
+    private float lastValidValue = 0f;
+    private float threshold = 5f;
+
+    private void ProcessReceivedValue(float newValue)
+    {
+        if (Mathf.Abs(newValue - lastValidValue) < threshold)
+        {
+            steeringInput = newValue;
+            lastValidValue = newValue;
+        }
+        else
+        {
+            Debug.LogWarning($"Filtered out an outlier: {newValue}");
+        }
     }
 
     public void GetInput()
     {
         try
         {
-            if (serialPort != null && serialPort.IsOpen)
+            if (serialPort.IsOpen)
             {
-                string arduino = serialPort.ReadLine();
-                steeringInput = float.Parse(arduino);
-            }
-            else
-            {
-                steeringInput = Input.GetAxis("Horizontal"); 
+                string arduinoData = serialPort.ReadExisting();
+                string[] dataParts = arduinoData.Split(',');
+
+                if (!string.IsNullOrEmpty(arduinoData))
+                {
+                    Debug.Log(arduinoData);
+
+                    if (float.TryParse(dataParts[0], out float parsedValue))
+                    {
+                        steeringInput = -parsedValue;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("Received data could not be parsed to a float.");
+                    }
+
+                    if (float.TryParse(dataParts[2], out float speedValue))
+                    {
+                        float newSpeed = speedValue / 10;
+                        vereticallInput = Mathf.Clamp(newSpeed, 0f, 40f);
+                    }
+                    else
+                    {
+                        vereticallInput = Input.GetAxis("Vertical");
+                        Debug.LogWarning("Speed data could not be parsed.");
+                    }
+                }
             }
         }
         catch (System.Exception ex)
@@ -139,127 +130,50 @@ public class BicycleVehicle : MonoBehaviour
         }
 
         horizontalInput = Input.GetAxis("Horizontal");
-        vereticallInput = Input.GetAxis("Vertical");
         braking = Input.GetKey(KeyCode.Space);
     }
 
     public void HandleEngine()
     {
-        backWheel.motorTorque = vereticallInput * motorforce;
-        currentbrakeForce = braking ? brakeForce : 0f;
+        float speed = vereticallInput * movementSpeed * Time.fixedDeltaTime;
+
         if (braking)
         {
-            ApplyBraking();
-        }
-        else
-        {
-            ReleaseBraking();
-        }
-    }
-
-    public void DownPresureOnSpeed()
-    {
-        Vector3 downforce = Vector3.down;
-        float downpressure;
-        if (rb.velocity.magnitude > 5)
-        {
-            downpressure = rb.velocity.magnitude;
-            rb.AddForce(downforce * downpressure, ForceMode.Force);
-        }
-    }
-
-    public void ApplyBraking()
-    {
-        // Reduce the brake friction while braking
-        if (brakeFriction > minFriction)
-        {
-            brakeFriction -= frictionDecayRate * Time.fixedDeltaTime;
+            speed = Mathf.Max(speed - brakeSpeed * Time.fixedDeltaTime, 0);
         }
 
-        frontWheel.brakeTorque = currentbrakeForce * brakeFriction;
-        backWheel.brakeTorque = currentbrakeForce * brakeFriction;
-    }
-
-    public void ReleaseBraking()
-    {
-        frontWheel.brakeTorque = 0;
-        backWheel.brakeTorque = 0;
-
-        // Gradually recover the brake friction when not braking
-        if (brakeFriction < 1.0f)
-        {
-            brakeFriction += frictionRecoveryRate * Time.fixedDeltaTime;
-        }
-        brakeFriction = Mathf.Clamp(brakeFriction, minFriction, 1.0f);
-    }
-
-    public void SpeedSteerinReductor()
-    {
-        if (rb.velocity.magnitude < 5) // We set the limiting factor for the steering
-        {
-            maxSteeringAngle = Mathf.LerpAngle(maxSteeringAngle, 50, speedteercontrolTime);
-        }
-        if (rb.velocity.magnitude > 5 && rb.velocity.magnitude < 10)
-        {
-            maxSteeringAngle = Mathf.LerpAngle(maxSteeringAngle, 30, speedteercontrolTime);
-        }
-        if (rb.velocity.magnitude > 10 && rb.velocity.magnitude < 15)
-        {
-            maxSteeringAngle = Mathf.LerpAngle(maxSteeringAngle, 15, speedteercontrolTime);
-        }
-        if (rb.velocity.magnitude > 15 && rb.velocity.magnitude < 20)
-        {
-            maxSteeringAngle = Mathf.LerpAngle(maxSteeringAngle, 10, speedteercontrolTime);
-        }
-        if (rb.velocity.magnitude > 20)
-        {
-            maxSteeringAngle = Mathf.LerpAngle(maxSteeringAngle, 5, speedteercontrolTime);
-        }
+        transform.Translate(Vector3.forward * speed);
     }
 
     public void HandleSteering()
     {
-
-        SpeedSteerinReductor();
         if (serialPort != null && serialPort.IsOpen)
         {
-            // Directly map the steeringInput to the steering angle
             currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, steeringInput, turnSmoothing);
-
-            // Clamp the steering angle to ensure it doesn't exceed the bike's max steering capabilities
             currentSteeringAngle = Mathf.Clamp(currentSteeringAngle, -maxSteeringAngle, maxSteeringAngle);
 
-            frontWheel.steerAngle = currentSteeringAngle;
             targetlayingAngle = maxlayingAngle * -steeringInput / maxSteeringAngle;
         }
         else
         {
             currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, maxSteeringAngle * horizontalInput, turnSmoothing);
-            frontWheel.steerAngle = currentSteeringAngle;
-
             targetlayingAngle = maxlayingAngle * -horizontalInput;
         }
+
+        transform.Rotate(Vector3.up * currentSteeringAngle * Time.fixedDeltaTime);
     }
 
     private void LayOnTurn()
     {
         Vector3 currentRot = transform.rotation.eulerAngles;
 
-        if (rb.velocity.magnitude < 1)
-        {
-            layingammount = Mathf.LerpAngle(layingammount, 0f, 0.05f);
-            transform.rotation = Quaternion.Euler(currentRot.x, currentRot.y, layingammount);
-            return;
-        }
-
-        if (currentSteeringAngle < 0.5f && currentSteeringAngle > -0.5) // We're straight
+        if (Mathf.Abs(currentSteeringAngle) < 0.5f)
         {
             layingammount = Mathf.LerpAngle(layingammount, 0f, leanSmoothing);
         }
-        else // We're turning
+        else
         {
             layingammount = Mathf.LerpAngle(layingammount, targetlayingAngle, leanSmoothing);
-            rb.centerOfMass = new Vector3(rb.centerOfMass.x, COG.y, rb.centerOfMass.z);
         }
 
         transform.rotation = Quaternion.Euler(currentRot.x, currentRot.y, layingammount);
@@ -267,24 +181,20 @@ public class BicycleVehicle : MonoBehaviour
 
     public void UpdateWheels()
     {
-        UpdateSingleWheel(frontWheel, frontWheeltransform);
-        UpdateSingleWheel(backWheel, backWheeltransform);
+        UpdateSingleWheel(frontWheeltransform);
+        UpdateSingleWheel(backWheeltransform);
     }
 
     public void UpdateHandle()
     {
-        Quaternion sethandleRot;
-        sethandleRot = frontWheeltransform.rotation;
+        Quaternion sethandleRot = frontWheeltransform.rotation;
         handle.localRotation = Quaternion.Euler(handle.localRotation.eulerAngles.x, currentSteeringAngle, handle.localRotation.eulerAngles.z);
     }
 
     private void EmitTrail()
     {
-        frontGrounded = frontWheel.GetGroundHit(out WheelHit Fhit);
-        rearGrounded = backWheel.GetGroundHit(out WheelHit Rhit);
-
-        fronttrail.emitting = frontGrounded;
-        rearttrail.emitting = rearGrounded;
+        fronttrail.emitting = true;
+        rearttrail.emitting = true;
     }
 
     private void StopEmitTrail()
@@ -293,13 +203,9 @@ public class BicycleVehicle : MonoBehaviour
         rearttrail.emitting = false;
     }
 
-    private void UpdateSingleWheel(WheelCollider wheelCollider, Transform wheelTransform)
+    private void UpdateSingleWheel(Transform wheelTransform)
     {
-        Vector3 pos;
-        Quaternion rot;
-        wheelCollider.GetWorldPose(out pos, out rot);
-        wheelTransform.rotation = rot;
-        wheelTransform.position = pos;
+        wheelTransform.localRotation = Quaternion.Euler(new Vector3(0, currentSteeringAngle, 0));
     }
 
     void OnApplicationQuit()
