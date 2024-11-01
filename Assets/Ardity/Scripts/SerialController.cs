@@ -123,7 +123,6 @@ public class SerialController : MonoBehaviour
         else if (ReferenceEquals(message, SERIAL_DEVICE_DISCONNECTED))
             messageListener.SendMessage("OnConnectionEvent", false);
         else
-            Debug.Log(message);
             messageListener.SendMessage("OnMessageArrived", message);
     }
 
@@ -134,7 +133,6 @@ public class SerialController : MonoBehaviour
     public string ReadSerialMessage()
     {
         // Read the next message from the queue
-
         return (string)serialThread.ReadMessage();
     }
 
