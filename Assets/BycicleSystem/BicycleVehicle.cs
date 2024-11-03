@@ -130,6 +130,7 @@ public class BicycleVehicle : MonoBehaviour
         }
 
         horizontalInput = Input.GetAxis("Horizontal");
+        vereticallInput = Input.GetAxis("Vertical");
         braking = Input.GetKey(KeyCode.Space);
     }
 
