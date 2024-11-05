@@ -20890,7 +20890,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 400000, guid: 00b78b03851cb0748b61d9005fb73b49, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 150
+      value: 151.1
       objectReference: {fileID: 0}
     - target: {fileID: 400000, guid: 00b78b03851cb0748b61d9005fb73b49, type: 3}
       propertyPath: m_LocalPosition.y
@@ -31856,15 +31856,23 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 4664322994268695228, guid: b9f42de6425d7a64492e24f3f8462954, type: 3}
       propertyPath: portName
-      value: COM4
+      value: /dev/tty.usbmodem11401
       objectReference: {fileID: 0}
     - target: {fileID: 4664322994268695228, guid: b9f42de6425d7a64492e24f3f8462954, type: 3}
       propertyPath: m_Enabled
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4664322994268695228, guid: b9f42de6425d7a64492e24f3f8462954, type: 3}
+      propertyPath: rearGrounded
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4664322994268695228, guid: b9f42de6425d7a64492e24f3f8462954, type: 3}
+      propertyPath: frontGrounded
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4664322994268695228, guid: b9f42de6425d7a64492e24f3f8462954, type: 3}
       propertyPath: leanSmoothing
-      value: 0.000001
+      value: 0.502
       objectReference: {fileID: 0}
     - target: {fileID: 4664322994268695228, guid: b9f42de6425d7a64492e24f3f8462954, type: 3}
       propertyPath: turnSmoothing
@@ -41257,6 +41265,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 48b7dcf45d32043dd8176e501695ff8f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  delay: 3
 --- !u!1001 &1091092098
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -47435,6 +47444,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 48b7dcf45d32043dd8176e501695ff8f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  delay: 3
 --- !u!136 &1239766598
 CapsuleCollider:
   m_ObjectHideFlags: 0

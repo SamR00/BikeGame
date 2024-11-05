@@ -6,7 +6,6 @@ public class PowerUp : MonoBehaviour
 {
     public float delay = 3f;
     bool hasExploded = false;
-    public GameObject explosionEffect; // Complete the declaration for your intended GameObject
     private float countdown;
 
     void Start()
@@ -41,7 +40,6 @@ public class PowerUp : MonoBehaviour
     void Explode()
     {
         // show effect
-        Instantiate(explosionEffect, transform.position, transform.rotation);
         
     }
 }
