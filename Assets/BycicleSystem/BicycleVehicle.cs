@@ -1,17 +1,14 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO.Ports;
-using System.Threading;
 using UnityEngine;
 
 public class BicycleVehicle : MonoBehaviour
 {
-    public string portName = "/dev/tty.usbmodem11401";
+    public string portName = "COM3";
     public int baudRate = 115200;
     public int readTimeout = 1000;
     private SerialPort serialPort;
-    private Thread serialThread;
-    private bool isSerialRunning = false;
 
     private string lastReceivedData = ""; // Store the last received value.
 
@@ -19,15 +16,13 @@ public class BicycleVehicle : MonoBehaviour
     float vereticallInput;
     float steeringInput;
 
-    private readonly object lockObject = new object(); // For thread-safe access to data
-
     public Transform handle;
     bool braking;
 
     public Vector3 COG;
 
-    [SerializeField] float movementSpeed = 10f;
-    [SerializeField] float brakeSpeed = 5f;
+    [SerializeField] float movementSpeed = 10f; // Direct movement speed multiplier.
+    [SerializeField] float brakeSpeed = 5f; // Speed reduction when braking.
 
     float steeringAngle;
     [SerializeField] float currentSteeringAngle;
@@ -52,7 +47,7 @@ public class BicycleVehicle : MonoBehaviour
     void Start()
     {
         StopEmitTrail();
-
+        // Initialize the serial port.
         serialPort = new SerialPort(portName, baudRate);
         serialPort.ReadTimeout = readTimeout;
 
@@ -60,10 +55,6 @@ public class BicycleVehicle : MonoBehaviour
         {
             serialPort.Open();
             Debug.Log("Serial port opened successfully.");
-
-            isSerialRunning = true;
-            serialThread = new Thread(SerialReadThread);
-            serialThread.Start();
         }
         catch (System.Exception ex)
         {
@@ -71,9 +62,9 @@ public class BicycleVehicle : MonoBehaviour
         }
     }
 
-    void Update()
+    void FixedUpdate()
     {
-        GetInput(); 
+        GetInput();
         HandleEngine();
         HandleSteering();
         UpdateWheels();
@@ -82,68 +73,60 @@ public class BicycleVehicle : MonoBehaviour
         EmitTrail();
     }
 
-    private void SerialReadThread()
+    private float lastValidValue = 0f;
+    private float threshold = 5f;
+
+    private void ProcessReceivedValue(float newValue)
     {
-        while (isSerialRunning && serialPort.IsOpen)
+        if (Mathf.Abs(newValue - lastValidValue) < threshold)
         {
-            try
-            {
-                string arduinoData = serialPort.ReadLine();
-                lock (lockObject)
-                {
-                    lastReceivedData = arduinoData;
-                }
-            }
-            catch (System.TimeoutException)
-            {
-                // Timeout occurred, can skip handling to avoid blocking
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError($"Serial read error: {ex.Message}");
-            }
-        }
-    }
-
-    //data komt nu van seperate thread waardoor programma niet elke frame ligt te wachten op input
-    public void GetInput()
-    {
-        string[] dataParts;
-
-        lock (lockObject)
-        {
-            // Make a local copy of the last received data
-            dataParts = lastReceivedData.Trim().Split(',');
-        }
-
-        if (dataParts.Length >= 3)
-        {
-            // Parse steering input(a)
-            if (float.TryParse(dataParts[0], out float parsedSteering))
-            {
-                steeringInput = -parsedSteering;
-            }
-            else
-            {
-                Debug.LogWarning("Steering data could not be parsed to a float.");
-            }
-
-            // Parse speed input(c)
-            if (float.TryParse(dataParts[2], out float parsedSpeed))
-            {
-                float newSpeed = parsedSpeed / 10f;
-                vereticallInput = Mathf.Clamp(newSpeed, 0f, 5f);
-            
-            }
-            else
-            {
-                vereticallInput = Input.GetAxis("Vertical");
-                Debug.LogWarning("Speed data could not be parsed.");
-            }
+            steeringInput = newValue;
+            lastValidValue = newValue;
         }
         else
         {
-            Debug.LogWarning($"Incomplete data received: '{lastReceivedData}'");
+            Debug.LogWarning($"Filtered out an outlier: {newValue}");
+        }
+    }
+
+    public void GetInput()
+    {
+        try
+        {
+            if (serialPort.IsOpen)
+            {
+                string arduinoData = serialPort.ReadExisting();
+                string[] dataParts = arduinoData.Split(',');
+
+                if (!string.IsNullOrEmpty(arduinoData))
+                {
+                    Debug.Log(arduinoData);
+
+                    if (float.TryParse(dataParts[0], out float parsedValue))
+                    {
+                        steeringInput = -parsedValue;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("Received data could not be parsed to a float.");
+                    }
+
+                    if (float.TryParse(dataParts[2], out float speedValue))
+                    {
+                        float newSpeed = speedValue / 10;
+                        vereticallInput = Mathf.Clamp(newSpeed, 0f, 40f);
+                    }
+                    else
+                    {
+                        vereticallInput = Input.GetAxis("Vertical");
+                        Debug.LogWarning("Speed data could not be parsed.");
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Serial read error: {ex.Message}");
         }
 
         horizontalInput = Input.GetAxis("Horizontal");
@@ -166,11 +149,11 @@ public class BicycleVehicle : MonoBehaviour
 
     public void HandleEngine()
     {
-        float speed = vereticallInput * movementSpeed * Time.deltaTime;
+        float speed = vereticallInput * movementSpeed * Time.fixedDeltaTime;
 
         if (braking)
         {
-            speed = Mathf.Max(speed - brakeSpeed * Time.deltaTime, 0);
+            speed = Mathf.Max(speed - brakeSpeed * Time.fixedDeltaTime, 0);
         }
 
         transform.Translate(Vector3.forward * speed);
@@ -178,12 +161,20 @@ public class BicycleVehicle : MonoBehaviour
 
     public void HandleSteering()
     {
-        currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, steeringInput, turnSmoothing);
-        currentSteeringAngle = Mathf.Clamp(currentSteeringAngle, -maxSteeringAngle, maxSteeringAngle);
+        if (serialPort != null && serialPort.IsOpen)
+        {
+            currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, steeringInput, turnSmoothing);
+            currentSteeringAngle = Mathf.Clamp(currentSteeringAngle, -maxSteeringAngle, maxSteeringAngle);
 
-        targetlayingAngle = maxlayingAngle * -steeringInput / maxSteeringAngle;
+            targetlayingAngle = maxlayingAngle * -steeringInput / maxSteeringAngle;
+        }
+        else
+        {
+            currentSteeringAngle = Mathf.Lerp(currentSteeringAngle, maxSteeringAngle * horizontalInput, turnSmoothing);
+            targetlayingAngle = maxlayingAngle * -horizontalInput;
+        }
 
-        transform.Rotate(Vector3.up * currentSteeringAngle * Time.deltaTime);
+        transform.Rotate(Vector3.up * currentSteeringAngle * Time.fixedDeltaTime);
     }
 
     private void LayOnTurn()
@@ -233,11 +224,7 @@ public class BicycleVehicle : MonoBehaviour
 
     void OnApplicationQuit()
     {
-        isSerialRunning = false;
-        Thread.Sleep(100); //Allow the thread to exit
         if (serialPort.IsOpen)
-        {
             serialPort.Close();
-        }
     }
 }
