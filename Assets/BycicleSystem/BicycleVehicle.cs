@@ -131,6 +131,20 @@ public class BicycleVehicle : MonoBehaviour
 
         horizontalInput = Input.GetAxis("Horizontal");
         braking = Input.GetKey(KeyCode.Space);
+
+        // Additional code to handle Z and S keys
+        if (Input.GetKey(KeyCode.Z))
+        {
+            vereticallInput = 1f; // Moving forward
+        }
+        else if (Input.GetKey(KeyCode.S))
+        {
+            vereticallInput = -1f; // Moving backward
+        }
+        else if (serialPort == null || !serialPort.IsOpen)
+        {
+            vereticallInput = 0f; // No input if neither key is pressed
+        }
     }
 
     public void HandleEngine()
